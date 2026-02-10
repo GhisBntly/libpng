@@ -11,9 +11,32 @@
  *
  * This file contains routines that are only called from within
  * libpng itself during the course of writing an image.
+ *
+ * This code includes modifications made by Epic Games to
+ * make use of vectorization on some compilers and also
+ * target different micro architectures with the goal of improving
+ * the performance of PNG creation. All modifications are
+ * clearly enclosed inside defines.
+ *
  */
 
 #include "pngpriv.h"
+
+// enable modifications only for clang-cl.exe targeting MSVC x64 build
+#if !defined PNG_EPICGAMES_MODIFICATION_ENABLE && defined(__clang__) && defined(_MSC_VER) && defined(__x86_64__)
+#  define PNG_EPICGAMES_MODIFICATION_ENABLE 1
+#endif
+
+#if PNG_EPICGAMES_MODIFICATION_ENABLE
+#include <intrin.h>
+// clang is unable to vectorize when a loop contains more than a single exit condition
+// so we skip early outs when vectorizing because performance is vastly better anyway.
+#define PNG_EPICGAMES_VECTORIZE_EARLY_OUT(code)
+#define PNG_EPICGAMES_VECTORIZE_LOOP             _Pragma("clang loop vectorize(assume_safety)")
+#else
+#define PNG_EPICGAMES_VECTORIZE_EARLY_OUT(code)  code
+#define PNG_EPICGAMES_VECTORIZE_LOOP
+#endif // PNG_EPICGAMES_MODIFICATION_ENABLE && defined(__clang__)
 
 #ifdef PNG_WRITE_SUPPORTED
 
@@ -2330,6 +2353,7 @@ png_setup_sub_row(png_structrp png_ptr, png_uint_32 bpp,
 
    png_ptr->try_row[0] = PNG_FILTER_VALUE_SUB;
 
+   PNG_EPICGAMES_VECTORIZE_LOOP
    for (i = 0, rp = png_ptr->row_buf + 1, dp = png_ptr->try_row + 1; i < bpp;
         i++, rp++, dp++)
    {
@@ -2341,6 +2365,7 @@ png_setup_sub_row(png_structrp png_ptr, png_uint_32 bpp,
 #endif
    }
 
+   PNG_EPICGAMES_VECTORIZE_LOOP
    for (lp = png_ptr->row_buf + 1; i < row_bytes;
       i++, rp++, lp++, dp++)
    {
@@ -2351,8 +2376,10 @@ png_setup_sub_row(png_structrp png_ptr, png_uint_32 bpp,
       sum += (v < 128) ? v : 256 - v;
 #endif
 
-      if (sum > lmins)  /* We are already worse, don't continue. */
+       PNG_EPICGAMES_VECTORIZE_EARLY_OUT(
+       if (sum > lmins)  /* We are already worse, don't continue. */
         break;
+       )
    }
 
    return sum;
@@ -2367,12 +2394,14 @@ png_setup_sub_row_only(png_structrp png_ptr, png_uint_32 bpp,
 
    png_ptr->try_row[0] = PNG_FILTER_VALUE_SUB;
 
+   PNG_EPICGAMES_VECTORIZE_LOOP
    for (i = 0, rp = png_ptr->row_buf + 1, dp = png_ptr->try_row + 1; i < bpp;
         i++, rp++, dp++)
    {
       *dp = *rp;
    }
 
+   PNG_EPICGAMES_VECTORIZE_LOOP
    for (lp = png_ptr->row_buf + 1; i < row_bytes;
       i++, rp++, lp++, dp++)
    {
@@ -2390,6 +2419,7 @@ png_setup_up_row(png_structrp png_ptr, size_t row_bytes, size_t lmins)
 
    png_ptr->try_row[0] = PNG_FILTER_VALUE_UP;
 
+   PNG_EPICGAMES_VECTORIZE_LOOP
    for (i = 0, rp = png_ptr->row_buf + 1, dp = png_ptr->try_row + 1,
        pp = png_ptr->prev_row + 1; i < row_bytes;
        i++, rp++, pp++, dp++)
@@ -2401,8 +2431,10 @@ png_setup_up_row(png_structrp png_ptr, size_t row_bytes, size_t lmins)
       sum += (v < 128) ? v : 256 - v;
 #endif
 
+      PNG_EPICGAMES_VECTORIZE_EARLY_OUT(
       if (sum > lmins)  /* We are already worse, don't continue. */
         break;
+      )
    }
 
    return sum;
@@ -2415,6 +2447,7 @@ png_setup_up_row_only(png_structrp png_ptr, size_t row_bytes)
 
    png_ptr->try_row[0] = PNG_FILTER_VALUE_UP;
 
+   PNG_EPICGAMES_VECTORIZE_LOOP
    for (i = 0, rp = png_ptr->row_buf + 1, dp = png_ptr->try_row + 1,
        pp = png_ptr->prev_row + 1; i < row_bytes;
        i++, rp++, pp++, dp++)
@@ -2434,6 +2467,7 @@ png_setup_avg_row(png_structrp png_ptr, png_uint_32 bpp,
 
    png_ptr->try_row[0] = PNG_FILTER_VALUE_AVG;
 
+   PNG_EPICGAMES_VECTORIZE_LOOP
    for (i = 0, rp = png_ptr->row_buf + 1, dp = png_ptr->try_row + 1,
        pp = png_ptr->prev_row + 1; i < bpp; i++)
    {
@@ -2446,6 +2480,7 @@ png_setup_avg_row(png_structrp png_ptr, png_uint_32 bpp,
 #endif
    }
 
+   PNG_EPICGAMES_VECTORIZE_LOOP
    for (lp = png_ptr->row_buf + 1; i < row_bytes; i++)
    {
       v = *dp++ = (png_byte)(((int)*rp++ - (((int)*pp++ + (int)*lp++) / 2))
@@ -2457,8 +2492,10 @@ png_setup_avg_row(png_structrp png_ptr, png_uint_32 bpp,
       sum += (v < 128) ? v : 256 - v;
 #endif
 
+      PNG_EPICGAMES_VECTORIZE_EARLY_OUT(
       if (sum > lmins)  /* We are already worse, don't continue. */
         break;
+      )
    }
 
    return sum;
@@ -2472,12 +2509,14 @@ png_setup_avg_row_only(png_structrp png_ptr, png_uint_32 bpp,
 
    png_ptr->try_row[0] = PNG_FILTER_VALUE_AVG;
 
+   PNG_EPICGAMES_VECTORIZE_LOOP
    for (i = 0, rp = png_ptr->row_buf + 1, dp = png_ptr->try_row + 1,
        pp = png_ptr->prev_row + 1; i < bpp; i++)
    {
       *dp++ = (png_byte)(((int)*rp++ - ((int)*pp++ / 2)) & 0xff);
    }
 
+   PNG_EPICGAMES_VECTORIZE_LOOP
    for (lp = png_ptr->row_buf + 1; i < row_bytes; i++)
    {
       *dp++ = (png_byte)(((int)*rp++ - (((int)*pp++ + (int)*lp++) / 2))
@@ -2496,6 +2535,7 @@ png_setup_paeth_row(png_structrp png_ptr, png_uint_32 bpp,
 
    png_ptr->try_row[0] = PNG_FILTER_VALUE_PAETH;
 
+   PNG_EPICGAMES_VECTORIZE_LOOP
    for (i = 0, rp = png_ptr->row_buf + 1, dp = png_ptr->try_row + 1,
        pp = png_ptr->prev_row + 1; i < bpp; i++)
    {
@@ -2508,6 +2548,7 @@ png_setup_paeth_row(png_structrp png_ptr, png_uint_32 bpp,
 #endif
    }
 
+   PNG_EPICGAMES_VECTORIZE_LOOP
    for (lp = png_ptr->row_buf + 1, cp = png_ptr->prev_row + 1; i < row_bytes;
         i++)
    {
@@ -2540,8 +2581,10 @@ png_setup_paeth_row(png_structrp png_ptr, png_uint_32 bpp,
       sum += (v < 128) ? v : 256 - v;
 #endif
 
+      PNG_EPICGAMES_VECTORIZE_EARLY_OUT(
       if (sum > lmins)  /* We are already worse, don't continue. */
         break;
+      )
    }
 
    return sum;
@@ -2555,12 +2598,14 @@ png_setup_paeth_row_only(png_structrp png_ptr, png_uint_32 bpp,
 
    png_ptr->try_row[0] = PNG_FILTER_VALUE_PAETH;
 
+   PNG_EPICGAMES_VECTORIZE_LOOP
    for (i = 0, rp = png_ptr->row_buf + 1, dp = png_ptr->try_row + 1,
        pp = png_ptr->prev_row + 1; i < bpp; i++)
    {
       *dp++ = (png_byte)(((int)*rp++ - (int)*pp++) & 0xff);
    }
 
+   PNG_EPICGAMES_VECTORIZE_LOOP
    for (lp = png_ptr->row_buf + 1, cp = png_ptr->prev_row + 1; i < row_bytes;
         i++)
    {
@@ -2590,8 +2635,15 @@ png_setup_paeth_row_only(png_structrp png_ptr, png_uint_32 bpp,
 }
 #endif /* WRITE_FILTER */
 
+#if PNG_EPICGAMES_MODIFICATION_ENABLE && defined(__clang__)
+// We want to compile this function for different micro-architecture without
+// copy pasting any code, using forceinline will provide that functionality.
+static __forceinline void /* PRIVATE */
+png_write_find_filter_inline(png_structp png_ptr, png_row_infop row_info)
+#else
 void /* PRIVATE */
 png_write_find_filter(png_structrp png_ptr, png_row_infop row_info)
+#endif // PNG_EPICGAMES_MODIFICATION_ENABLE && defined(__clang__)
 {
 #ifndef PNG_WRITE_FILTER_SUPPORTED
    png_write_filtered_row(png_ptr, png_ptr->row_buf, row_info->rowbytes+1);
@@ -2661,6 +2713,7 @@ png_write_find_filter(png_structrp png_ptr, png_row_infop row_info)
       unsigned int v;
 
       {
+         PNG_EPICGAMES_VECTORIZE_LOOP
          for (i = 0, rp = row_buf + 1; i < row_bytes; i++, rp++)
          {
             v = *rp;
@@ -2822,4 +2875,75 @@ png_write_filtered_row(png_structrp png_ptr, png_bytep filtered_row,
    }
 #endif /* WRITE_FLUSH */
 }
+
+#if PNG_EPICGAMES_MODIFICATION_ENABLE
+
+void /* PRIVATE */
+png_write_find_filter_generic(png_structp png_ptr, png_row_infop row_info)
+{
+	png_write_find_filter_inline(png_ptr, row_info);
+}
+
+// Compile a version for the AVX2 instruction set
+__attribute__((target("avx2")))
+void /* PRIVATE */
+png_write_find_filter_avx2(png_structp png_ptr, png_row_infop row_info)
+{
+	png_write_find_filter_inline(png_ptr, row_info);
+}
+
+int has_4th_gen_intel_core_features()
+{
+    int flags[4];
+    /* CPUID.(EAX=01H, ECX=0H):ECX.FMA[bit 12]==1   &&
+       CPUID.(EAX=01H, ECX=0H):ECX.MOVBE[bit 22]==1 &&
+       CPUID.(EAX=01H, ECX=0H):ECX.XSAVE[bit 26]==1 &&
+       CPUID.(EAX=01H, ECX=0H):ECX.OSXSAVE[bit 27]==1 &&
+       CPUID.(EAX=01H, ECX=0H):ECX.AVX[bit 28]==1 */
+    const int FMA_MOVBE_XSAVE_OSXSAVE_AVX_BITS = (1 << 12) | (1 << 22) | (1 << 26) | (1 << 27) | (1 << 28);
+    __cpuidex(flags, 1, 0);
+    if ((flags[2] & FMA_MOVBE_XSAVE_OSXSAVE_AVX_BITS) != FMA_MOVBE_XSAVE_OSXSAVE_AVX_BITS)
+        return 0;
+
+    /*  CPUID.(EAX=07H, ECX=0H):EBX.AVX2[bit 5]==1  &&
+        CPUID.(EAX=07H, ECX=0H):EBX.BMI1[bit 3]==1  &&
+        CPUID.(EAX=07H, ECX=0H):EBX.BMI2[bit 8]==1  */
+    const int AVX2_BMI1_BMI2_BITS = (1 << 5) | (1 << 3) | (1 << 8);
+    __cpuidex(flags, 7, 0);
+    if ((flags[1] & AVX2_BMI1_BMI2_BITS) != AVX2_BMI1_BMI2_BITS)
+        return 0;
+
+    /* CPUID.(EAX=80000001H):ECX.LZCNT[bit 5]==1 */
+    const int LZCNT_BITS = (1 << 5);
+    __cpuidex(flags, 0x80000001, 0);
+    if ((flags[2] & LZCNT_BITS) != LZCNT_BITS)
+        return 0;
+
+    // OS must save YMM registers between context switch
+    if ((_xgetbv(0) & 6) != 6)
+        return 0;
+
+    return 1;
+}
+
+// Manual dispatch as we're not always linking with llvm __builtins for now
+void /* PRIVATE */
+png_write_find_filter(png_structp png_ptr, png_row_infop row_info)
+{
+    static void (*png_write_find_filter_dispatch)(png_structp png_ptr, png_row_infop row_info) = 0;
+    if (png_write_find_filter_dispatch == 0)
+    {
+        // this is expected to be thread-safe as pointer-sized writes are atomic on supported platforms
+        // and passing here more than once will yield the same result every time.
+        if (has_4th_gen_intel_core_features())
+            png_write_find_filter_dispatch = png_write_find_filter_avx2;
+        else
+            png_write_find_filter_dispatch = png_write_find_filter_generic;
+    }
+
+    png_write_find_filter_dispatch(png_ptr, row_info);
+}
+
+#endif // PNG_EPICGAMES_MODIFICATION_ENABLE && defined(__clang__)
+
 #endif /* WRITE */
